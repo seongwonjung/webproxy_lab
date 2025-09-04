@@ -1079,3 +1079,43 @@ int Open_listenfd(char *port)
 }
 
 /* $end csapp.c */
+
+int open_listenfd(char *port)
+{
+    struct addrinfo hints, *listp, *p;
+    int listenfd, optval = 1;
+
+    /* 1) 바인딩 가능한 서버 주소 후보 리스트를 얻는다 */
+    memset(&hints, 0, sizeof(struct addrinfo));     // hints를 0으로 안전 초기화
+    hints.ai_socktype = SOCK_STREAM;                // TCP(연결 지향)만 받겠다
+    hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;    // 서버용 주소 생성 + 로컬이 지원하는 패밀리만
+    hints.ai_flags |= AI_NUMERICSERV;               // service는 반드시 숫자 포트 문자열로
+    Getaddrinfo(NULL, port, &hints, &listp);        // host = NULL + AI_PASSIVE -> 0.0.0.0(와일드카드) 등
+
+    /* 2) 후보 리스트를 돌며 소켓 생성 -> 옵션 설정 -> bind 시도*/
+    for(p = listp; p; p = p->ai_next){
+        /* 소켓 생성 (IPv4/IPv6 후보에 맞춰 자동) */
+        if((listenfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0)
+            continue;
+        
+        Setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval, sizeof(int));
+        
+        /* 주소에 소켓을 바인딩 */
+        if(bind(listenfd, p->ai_addr, p->ai_addrlen) == 0)
+            break;          // 성공했으면 루프 탈출
+        Close(listenfd);    // 실패 시 fd 누수 방지 후 다음 후보
+    }
+
+    /* 3) getaddrinfo가 만든 메모리 해제 */
+    Freeaddrinfo(listp);
+
+    if(!p)
+        return -1;
+    
+    /* 4) 리스닝 소켓으로 전환 (이제 accept() 가능) */
+    if(listen(listenfd, LISTENQ) < 0){
+        Close(listenfd);
+        return -1;
+    }
+    return listenfd;
+}
